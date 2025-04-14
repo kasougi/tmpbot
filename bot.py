@@ -11,14 +11,8 @@ from telegram.ext import (
 )
 from telethon.sync import TelegramClient
 
-# 🔹 Настройки API
-BOT_TOKEN = "8194586426:AAFr1GWWMuJfEsUpaQigGQ-Zw98rv75JY2c"
-API_ID = "22383224"
-API_HASH = "b40e492d17c8e8cbb05909e001df0993"
-CHANNEL_ID = -1002116836369  # ID закрытого канала
-MANAGER_ID = 7754578809  # ID менеджера (замени на реальный ID)
 
-client = TelegramClient("session_name", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+client = TelegramClient("session_name", API_ID, API_HASH)
 
 # 🔹 Хранилище постов и бронирований
 user_posts = {}
@@ -70,7 +64,7 @@ NOTIFICATIONS = """
 # 🔹 Функция отправки напоминаний
 async def send_evening_reminders(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(pytz.timezone("Europe/Moscow")).time()
-    target_time = time(19, 45)  # 18:00 по Москве
+    target_time = time(18, 00)  # 18:00 по Москве
 
     if now.hour == target_time.hour and now.minute == target_time.minute:
         for user_id in active_users:
@@ -253,10 +247,10 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # # ✅ Запускаем напоминания в фоне
-    # loop = asyncio.get_event_loop()
-    # loop.create_task(schedule_reminders(app))
-    setup_jobs(app)
+    # ✅ Запускаем напоминания в фоне
+    loop = asyncio.get_event_loop()
+    loop.create_task(schedule_reminders(app))
+    # setup_jobs(app)
 
     print("Бот запущен...")
     app.run_polling()
