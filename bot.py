@@ -67,25 +67,45 @@ NOTIFICATIONS = """
 Заглядывайте в бот! Уверены, вы найдете что-то для себя 🙏
 """
 
+# 🔹 Функция отправки напоминаний
 async def send_evening_reminders(context: ContextTypes.DEFAULT_TYPE):
-    num_posts = await fetch_filtered_posts()
-    if num_posts:
+    now = datetime.now(pytz.timezone("Europe/Moscow")).time()
+    target_time = time(19, 45)  # 18:00 по Москве
+
+    if now.hour == target_time.hour and now.minute == target_time.minute:
         for user_id in active_users:
             if user_id != MANAGER_ID:
-                try:
-                    keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_sets")]]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    await context.bot.send_message(user_id, NOTIFICATIONS.format(num=len(num_posts)), reply_markup=reply_markup)
-                except Exception as e:
-                    logging.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
+                num = await fetch_filtered_posts()
+                if len(num):
+                    try:
+                        keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_sets")]]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        await context.bot.send_message(user_id, NOTIFICATIONS.format(num=len(num)), reply_markup=reply_markup)
+                    except Exception as e:
+                        logging.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
 
-def setup_jobs(application: Application):
-    job_queue = application.job_queue
-    job_queue.run_daily(
-        send_evening_reminders,
-        time(hour=18, minute=59, tzinfo=pytz.timezone("Europe/Moscow"))
-    )
-    print("⏰ Планировщик задач запущен.")
+# async def send_evening_reminders(context: ContextTypes.DEFAULT_TYPE):
+#     num_posts = await fetch_filtered_posts()
+#     if num_posts:
+#         for user_id in context.bot_data.get("active_users", set()):
+#             if user_id != MANAGER_ID:
+#                 try:
+#                     keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_sets")]]
+#                     reply_markup = InlineKeyboardMarkup(keyboard)
+#                     await context.bot.send_message(user_id, NOTIFICATIONS.format(num=len(num_posts)), reply_markup=reply_markup)
+#                 except Exception as e:
+#                     logging.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
+
+# # Запуск напоминаний в 18:00 по Москве
+# def setup_jobs(application: Application):
+#     job_queue = application.job_queue
+#     job_queue.run_daily(send_evening_reminders, time(hour=18, minute=49, tzinfo=pytz.timezone("Europe/Moscow")))
+
+# 🔹 Функция планировщика напоминаний
+async def schedule_reminders(application: Application):
+    while True:
+        await send_evening_reminders(application)  # Отправляем напоминания
+        await asyncio.sleep(60)  # Проверяем раз в минуту
 
 # 🔹 Функция старта
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -233,8 +253,11 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    app.initialize()
+    # # ✅ Запускаем напоминания в фоне
+    # loop = asyncio.get_event_loop()
+    # loop.create_task(schedule_reminders(app))
     setup_jobs(app)
+
     print("Бот запущен...")
     app.run_polling()
 
