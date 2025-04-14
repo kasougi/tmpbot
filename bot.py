@@ -220,8 +220,10 @@ async def manager_confirm_payment(update: Update, context: ContextTypes.DEFAULT_
             except Exception as e:
                 print(e)
 
+        keyboard = [[InlineKeyboardButton("📦 Вернуться к наборам", callback_data="view_sets")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         # ✅ Отправляем пользователю "✅ Бронирование прошло успешно!"
-        await context.bot.send_message(user_id, "✅ Бронирование прошло успешно!")
+        await context.bot.send_message(user_id, "✅ Бронирование прошло успешно!", reply_markup=reply_markup)
 
         keyboard = [[InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_payment_{user_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
