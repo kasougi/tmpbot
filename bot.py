@@ -11,15 +11,8 @@ from telegram.ext import (
 )
 from telethon.sync import TelegramClient
 
-
 client = TelegramClient("session_name", API_ID, API_HASH)
 
-# 🔹 Хранилище постов и бронирований
-user_posts = {}
-user_reservations = {}  # {user_id: (post_id, message_id)}
-active_users = set()
-
-# pending_payments = {}  # {user_id: message_id подтверждения оплаты}
 
 START_MESSAGE = """
 Дорогие клиенты, мы рады всех приветствовать в нашем чат-боте! 👀
@@ -67,7 +60,7 @@ async def send_evening_reminders(context: ContextTypes.DEFAULT_TYPE):
     target_time = time(18, 00)  # 18:00 по Москве
 
     if now.hour == target_time.hour and now.minute == target_time.minute:
-        for user_id in active_users:
+        for user_id in context.bot_data.get("active_users", set()):
             if user_id != MANAGER_ID:
                 num = await fetch_filtered_posts()
                 if len(num):
@@ -77,23 +70,6 @@ async def send_evening_reminders(context: ContextTypes.DEFAULT_TYPE):
                         await context.bot.send_message(user_id, NOTIFICATIONS.format(num=len(num)), reply_markup=reply_markup)
                     except Exception as e:
                         logging.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
-
-# async def send_evening_reminders(context: ContextTypes.DEFAULT_TYPE):
-#     num_posts = await fetch_filtered_posts()
-#     if num_posts:
-#         for user_id in context.bot_data.get("active_users", set()):
-#             if user_id != MANAGER_ID:
-#                 try:
-#                     keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_sets")]]
-#                     reply_markup = InlineKeyboardMarkup(keyboard)
-#                     await context.bot.send_message(user_id, NOTIFICATIONS.format(num=len(num_posts)), reply_markup=reply_markup)
-#                 except Exception as e:
-#                     logging.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
-
-# # Запуск напоминаний в 18:00 по Москве
-# def setup_jobs(application: Application):
-#     job_queue = application.job_queue
-#     job_queue.run_daily(send_evening_reminders, time(hour=18, minute=49, tzinfo=pytz.timezone("Europe/Moscow")))
 
 # 🔹 Функция планировщика напоминаний
 async def schedule_reminders(application: Application):
@@ -105,7 +81,8 @@ async def schedule_reminders(application: Application):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id != MANAGER_ID:
-        active_users.add(user_id)  # Запоминаем пользователя
+        context.bot_data.get("active_users", set()).add(user_id)  # Запоминаем пользователя
+        
         keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_sets")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
@@ -126,12 +103,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     await query.answer()
 
-    if data == "view_sets":
-        if user_id not in user_posts:
-            user_posts[user_id] = await fetch_filtered_posts()
+    if data == "view_sets" or data == "view_set_new":
+        if "posts" not in context.user_data or data == "view_set_new":
+            context.user_data["posts"] = await fetch_filtered_posts()
 
-        if user_posts[user_id]:
-            post = user_posts[user_id].pop(0)
+        if context.user_data["posts"]:
+            post = context.user_data["posts"].pop(0)
 
             sent_message = await context.bot.forward_message(
                 chat_id=user_id,
@@ -153,13 +130,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
         else:
-            keyboard = [[InlineKeyboardButton("📦 Проверить наличие новых наборов", callback_data="view_sets")]]
+            keyboard = [[InlineKeyboardButton("📦 Посмотреть актуальные наборы", callback_data="view_set_new")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.reply_text(CLOSE_MESSAGE, reply_markup=reply_markup)
 
     elif data.startswith("reserve_"):
         _, msg_id, post_id = data.split("_")
-        user_reservations[user_id] = (int(post_id), int(msg_id))
+        context.bot_data["reservation"][user_id] = (int(post_id), int(msg_id))
+        
+        # context.user_data["reservation"] = (int(post_id), int(msg_id))
+        # print(context.user_data["reservation"])
 
         confirmation_message = await query.message.reply_text(
             PAYMENTS_MESSAGE
@@ -175,8 +155,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
 
-    if user_id in user_reservations:
-        post_id, msg_id = user_reservations[user_id]
+    if user_id in context.bot_data["reservation"]:
+        post_id, msg_id = context.bot_data["reservation"][user_id]
         media_message = update.message
 
         # ✅ Пересылаем оригинальный пост менеджеру
@@ -201,7 +181,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         new_confirmation = await update.message.reply_text("✅ Ваш платеж отправлен менеджеру на проверку!")
-
     else:
         await update.message.reply_text("Сначала нажмите забронируйте место.🤍")
 
@@ -210,8 +189,9 @@ async def manager_confirm_payment(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     user_id = int(data.split("_")[-1])
 
-    if user_id in user_reservations:
-        _, user_message_id = user_reservations[user_id]
+    if user_id in context.bot_data["reservation"]:
+
+        _, user_message_id =  context.bot_data["reservation"][user_id]
 
         # ✅ Удаляем сообщение "✅ Ваш платеж отправлен менеджеру на проверку!"
         if user_message_id:
@@ -231,7 +211,7 @@ async def manager_confirm_payment(update: Update, context: ContextTypes.DEFAULT_
         await query.message.edit_text("✅ Ваша оплата принята, благодарим за сотрудничество!", reply_markup=reply_markup)
 
         # ✅ Удаляем запись о бронировании
-        del user_reservations[user_id]
+        del context.bot_data["reservation"][user_id]
 
     else:
         await query.answer("Платеж уже обработан или не найден.", show_alert=True)
@@ -244,6 +224,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    app.bot_data.setdefault("reservation", dict())
+    app.bot_data.setdefault("active_users", set())
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
