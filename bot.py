@@ -12,11 +12,12 @@ from telegram.ext import (
 from telethon.sync import TelegramClient
 from telegram.ext import PicklePersistence
 
+
 client = TelegramClient("session_name", API_ID, API_HASH)
 
 
 START_MESSAGE = """
-Дорогие клиенты, мы рады всех приветствовать в нашем чат-боте! 👀
+<b>Дорогие клиенты, мы рады всех приветствовать в нашем чат-боте! 👀</b>
 
 Команда «Реклама в тгк» представляет инновацию в сфере оказания рекламных услуг! Теперь, с помощью нашего бота, вы сможете покупать совместную рекламу еще удобнее и безопаснее. Больше не будет сообщений от назойливых мошенников и вечного спама напоминаниями в канале 🤍🙏
 
@@ -30,7 +31,7 @@ START_MESSAGE = """
 - мы не несем ответственность за приход 
 - работаем только по полной предоплате 
 - оплата возвращается только в случае отмены рекламы 
-Задать любой вопрос: @manageraddv
+<b>Задать любой вопрос:</b> @manageraddv
 """
 
 PAYMENTS_MESSAGE = """
@@ -38,9 +39,9 @@ PAYMENTS_MESSAGE = """
 2202208318731503
 Мария З. Сбербанк. 
 
-После перевода обязательно пришлите скриншот и ссылку на канал одним сообщением!
+После перевода обязательно пришлите <b>скриншот оплаты</b> и ссылку на канал одним сообщением!
 
-Задать любой вопрос: @manageraddv
+<b>Задать любой вопрос:</b> @manageraddv
 """
 
 CLOSE_MESSAGE = """
@@ -84,11 +85,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id != MANAGER_ID:
         context.bot_data.setdefault("users", set()).add(user_id)  # Запоминаем пользователя
         print(context.bot_data.setdefault("users", set()))
-        keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_sets")]]
+        keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_set_new")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
             START_MESSAGE,
-            reply_markup=reply_markup)
+            reply_markup=reply_markup,
+            parse_mode="HTML")
         
 def manager_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -127,7 +129,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
     await query.answer()
-
+    context.bot_data.setdefault("users", set()).add(user_id)
     if data == "view_sets" or data == "view_set_new":
         if "posts" not in context.user_data or data == "view_set_new":
             context.user_data["posts"] = await fetch_filtered_posts()
@@ -169,7 +171,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # print(context.user_data["reservation"])
 
         confirmation_message = await query.message.reply_text(
-            PAYMENTS_MESSAGE
+            PAYMENTS_MESSAGE, parse_mode="HTML"
         )
 
         # pending_payments[user_id] = confirmation_message.message_id
