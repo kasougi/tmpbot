@@ -10,6 +10,7 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 from telethon.sync import TelegramClient
+from telegram.ext import PicklePersistence
 
 client = TelegramClient("session_name", API_ID, API_HASH)
 
@@ -60,7 +61,7 @@ async def send_evening_reminders(context: ContextTypes.DEFAULT_TYPE):
     target_time = time(18, 00)  # 18:00 по Москве
 
     if now.hour == target_time.hour and now.minute == target_time.minute:
-        for user_id in context.bot_data.get("active_users", set()):
+        for user_id in context.bot_data.get("users", set()):
             if user_id != MANAGER_ID:
                 num = await fetch_filtered_posts()
                 if len(num):
@@ -81,13 +82,37 @@ async def schedule_reminders(application: Application):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id != MANAGER_ID:
-        context.bot_data.get("active_users", set()).add(user_id)  # Запоминаем пользователя
-        
+        context.bot_data.setdefault("users", set()).add(user_id)  # Запоминаем пользователя
+        print(context.bot_data.setdefault("users", set()))
         keyboard = [[InlineKeyboardButton("📦 Посмотреть наборы", callback_data="view_sets")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
             START_MESSAGE,
             reply_markup=reply_markup)
+        
+def manager_only(func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        if user_id not in MANAGERS_IDS:
+            await update.message.reply_text("⛔ Доступ запрещён.")
+            return
+        return await func(update, context)
+    return wrapper
+
+@manager_only
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    num_users = len(context.bot_data.get("users", set()))
+    num_active_users = len(context.bot_data.get("active_users", set()))
+    reservations = len(context.bot_data.get("hustory_reservation", []))
+
+    await update.message.reply_text(
+        f"📊 Статистика:\n\n"
+        f"👥 Пользователей за всё время: {num_users}\n"
+        f"👥 Активных пользователей за всё время: {num_active_users}\n"
+        f"📦 Бронирований: {reservations}"
+    )
     
 # 🔹 Получение отфильтрованных постов
 async def fetch_filtered_posts():
@@ -130,12 +155,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
         else:
+            context.bot_data.setdefault("active_users", set()).add(user_id)
             keyboard = [[InlineKeyboardButton("📦 Посмотреть актуальные наборы", callback_data="view_set_new")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.reply_text(CLOSE_MESSAGE, reply_markup=reply_markup)
 
     elif data.startswith("reserve_"):
         _, msg_id, post_id = data.split("_")
+        context.bot_data.setdefault("reservation", dict())
         context.bot_data["reservation"][user_id] = (int(post_id), int(msg_id))
         
         # context.user_data["reservation"] = (int(post_id), int(msg_id))
@@ -181,6 +208,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         new_confirmation = await update.message.reply_text("✅ Ваш платеж отправлен менеджеру на проверку!")
+        context.bot_data.setdefault("hustory_reservation", []).add(user_id)
     else:
         await update.message.reply_text("Сначала нажмите забронируйте место.🤍")
 
@@ -200,7 +228,7 @@ async def manager_confirm_payment(update: Update, context: ContextTypes.DEFAULT_
             except Exception as e:
                 print(e)
 
-        keyboard = [[InlineKeyboardButton("📦 Вернуться к наборам", callback_data="view_sets")]]
+        keyboard = [[InlineKeyboardButton("📦 Вернуться к наборам", callback_data="view_set_new")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         # ✅ Отправляем пользователю "✅ Бронирование прошло успешно!"
         await context.bot.send_message(user_id, "✅ Бронирование прошло успешно!", reply_markup=reply_markup)
@@ -222,12 +250,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🔹 Основная функция
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    persistence = PicklePersistence(filepath="bot_data.pkl")
+
+    app = Application.builder().token(BOT_TOKEN).persistence(persistence).build()
 
     app.bot_data.setdefault("reservation", dict())
+    app.bot_data.setdefault("hustory_reservation", set())
+    app.bot_data.setdefault("users", set())
     app.bot_data.setdefault("active_users", set())
     
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stats", stats))
+
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_media))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
